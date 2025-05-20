@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>標本化と量子化の体験（クリーン再設計版）</title>
+  <title>標本化と量子化の体験（0.1Hz対応＋波形周波数変更＋時間軸表示）</title>
   <style>
     body {
       font-family: sans-serif;
@@ -27,7 +27,8 @@
   <h1>標本化と量子化の体験</h1>
   <div class="controls">
     <button id="quantizeBtn">量子化する</button>
-    <label>標本化レベル: <input type="range" id="sampleRate" min="4" max="32" value="8" /></label>
+    <label>波形周波数: <input type="range" id="waveFreq" min="1" max="10" value="2" step="1" /></label>
+    <label>標本化周波数: <input type="range" id="sampleFreq" min="1" max="500" value="10" step="1" /></label>
     <label>量子化レベル: <input type="range" id="quantLevels" min="2" max="16" value="4" /></label>
     <label>振幅: <input type="range" id="amplitude" min="20" max="150" value="100" /></label>
     <label><input type="checkbox" id="showGuides" checked /> ガイド線表示</label>
@@ -35,7 +36,8 @@
   </div>
 
   <div class="info">
-    標本化周波数: <span id="sampleFreq"></span> ／ 量子化レベル: <span id="quantInfo"></span>
+    標本化周波数: <span id="sampleFreqLabel"></span> ／ 波形周波数: <span id="waveFreqLabel"></span><br>
+    量子化レベル: <span id="quantInfo"></span>
   </div>
 
   <canvas id="waveCanvas" width="800" height="400"></canvas>
@@ -49,61 +51,66 @@
     const canvas = document.getElementById("waveCanvas");
     const ctx = canvas.getContext("2d");
 
-    const sampleRateInput = document.getElementById("sampleRate");
+    const sampleFreqInput = document.getElementById("sampleFreq");
+    const waveFreqInput = document.getElementById("waveFreq");
     const quantLevelsInput = document.getElementById("quantLevels");
     const amplitudeInput = document.getElementById("amplitude");
     const quantizeBtn = document.getElementById("quantizeBtn");
     const showGuides = document.getElementById("showGuides");
     const showReconstruction = document.getElementById("showReconstruction");
 
-    const sampleFreqLabel = document.getElementById("sampleFreq");
+    const sampleFreqLabel = document.getElementById("sampleFreqLabel");
+    const waveFreqLabel = document.getElementById("waveFreqLabel");
     const quantInfoLabel = document.getElementById("quantInfo");
     const binaryData = document.getElementById("binaryData");
     const bitCount = document.getElementById("bitCount");
 
-    let samplePoints = [];
-    let originalPoints = [];
-    let quantized = false;
+    let samplePoints = [], originalPoints = [], quantized = false;
 
     const draw = () => {
       ctx.clearRect(0, 0, canvas.width, canvas.height);
       const width = canvas.width, height = canvas.height;
-      const sampleRate = parseInt(sampleRateInput.value);
+      const sampleFreq = parseInt(sampleFreqInput.value) / 10;
+      const waveFreq = parseInt(waveFreqInput.value);
       const quantLevels = parseInt(quantLevelsInput.value);
       const amplitude = parseInt(amplitudeInput.value);
       const bits = Math.log2(quantLevels) | 0;
 
-      sampleFreqLabel.textContent = `${(sampleRate / 10).toFixed(1)} Hz（間隔: ${(10 / sampleRate).toFixed(2)}s）`;
+      sampleFreqLabel.textContent = `${sampleFreq.toFixed(1)} Hz（間隔: ${(1 / sampleFreq).toFixed(2)}s）`;
+      waveFreqLabel.textContent = `${waveFreq} Hz`;
       quantInfoLabel.textContent = `${quantLevels} 段階（${bits} bit）`;
 
       if (showGuides.checked) {
-        // 波形
         ctx.beginPath();
         for (let x = 0; x <= width; x++) {
-          const y = height / 2 - Math.sin((x / width) * 4 * Math.PI) * amplitude;
+          const y = height / 2 - Math.sin((x / width) * waveFreq * 2 * Math.PI) * amplitude;
           ctx.lineTo(x, y);
         }
         ctx.strokeStyle = quantized ? 'rgba(150,150,150,0.3)' : '#aaa';
         ctx.stroke();
 
-        // ガイド線
-        for (let i = 0; i < sampleRate; i++) {
-          const x = (i / (sampleRate - 1)) * width;
+        for (let i = 0; i < samplePoints.length; i++) {
+          const x = samplePoints[i].x;
           ctx.beginPath();
           ctx.moveTo(x, 0);
           ctx.lineTo(x, height);
           ctx.strokeStyle = '#ddd';
           ctx.stroke();
         }
+
         for (let i = 0; i < quantLevels; i++) {
           const y = (i / (quantLevels - 1)) * height;
-          const level = quantLevels - 1 - i;
           ctx.beginPath();
           ctx.moveTo(0, y);
           ctx.lineTo(width, y);
           ctx.strokeStyle = '#eee';
           ctx.stroke();
         }
+
+        ctx.fillStyle = '#888';
+        ctx.font = '12px sans-serif';
+        ctx.fillText('0s', 2, height - 6);
+        ctx.fillText('1s', width - 24, height - 6);
       }
 
       if (quantized && showGuides.checked) {
@@ -150,14 +157,16 @@
     };
 
     const generateSamples = () => {
-      const sampleRate = parseInt(sampleRateInput.value);
-      const amplitude = parseInt(amplitudeInput.value);
+      const sampleFreq = parseInt(sampleFreqInput.value) / 10;
+      const waveFreq = parseInt(waveFreqInput.value);
       const width = canvas.width;
       const height = canvas.height;
+      const totalTime = 1;
+      const sampleCount = Math.max(2, Math.floor(sampleFreq * totalTime));
       samplePoints = [];
-      for (let i = 0; i < sampleRate; i++) {
-        const x = (i / (sampleRate - 1)) * width;
-        const y = height / 2 - Math.sin((x / width) * 4 * Math.PI) * amplitude;
+      for (let i = 0; i < sampleCount; i++) {
+        const x = (i / (sampleCount - 1)) * width;
+        const y = height / 2 - Math.sin((x / width) * waveFreq * 2 * Math.PI) * parseInt(amplitudeInput.value);
         samplePoints.push({ x, y });
       }
       originalPoints = JSON.parse(JSON.stringify(samplePoints));
@@ -165,7 +174,8 @@
       draw();
     };
 
-    sampleRateInput.addEventListener('input', generateSamples);
+    sampleFreqInput.addEventListener('input', generateSamples);
+    waveFreqInput.addEventListener('input', generateSamples);
     quantLevelsInput.addEventListener('input', () => { quantized = false; draw(); });
     amplitudeInput.addEventListener('input', generateSamples);
     quantizeBtn.addEventListener('click', () => {
