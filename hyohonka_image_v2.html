@@ -1,0 +1,212 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>画像のデジタル化体験（クリーン版）</title>
+  <style>
+    body {
+      font-family: sans-serif;
+      background: #f4f4f4;
+      text-align: center;
+      margin: 0;
+      padding: 20px;
+    }
+    canvas {
+      background: #fff;
+      border: 1px solid #ccc;
+      margin: 10px;
+    }
+    .controls, .info {
+      margin-top: 20px;
+      font-size: 14px;
+    }
+    .preview-wrapper {
+      display: flex;
+      justify-content: center;
+      align-items: flex-start;
+      gap: 20px;
+      margin-top: 20px;
+    }
+    .preview-box {
+      position: relative;
+    }
+    .zoom-indicator {
+      position: absolute;
+      border: 2px solid red;
+      pointer-events: none;
+    }
+    .color-bar {
+      display: flex;
+      justify-content: center;
+      gap: 4px;
+      margin-top: 10px;
+      flex-wrap: wrap;
+    }
+    .color-box {
+      width: 20px;
+      height: 20px;
+    }
+  </style>
+</head>
+<body>
+  <h1>画像のデジタル化体験</h1>
+  <div class="controls">
+    <input type="file" id="imageLoader" accept="image/*">
+    <label>標本化レベル: <input type="range" id="sampling" min="4" max="128" value="32" /></label>
+    <label>量子化ビット数: <input type="range" id="quantBits" min="1" max="8" value="8" /></label>
+    <button id="sampleButton">標本化</button>
+    <button id="quantButton">量子化</button>
+  </div>
+
+  <div class="color-bar" id="colorBar"></div>
+
+  <div class="preview-wrapper">
+    <div class="preview-box">
+      <canvas id="mainCanvas" width="400" height="400"></canvas>
+      <div class="zoom-indicator" id="zoomIndicator"></div>
+    </div>
+    <div class="preview-box">
+      <canvas id="zoomCanvas" width="400" height="400"></canvas>
+    </div>
+  </div>
+
+  <div class="info">
+    データ量: <span id="bitInfo"></span>
+  </div>
+
+  <script>
+    const imageLoader = document.getElementById("imageLoader");
+    const samplingInput = document.getElementById("sampling");
+    const quantBitsInput = document.getElementById("quantBits");
+    const sampleButton = document.getElementById("sampleButton");
+    const quantButton = document.getElementById("quantButton");
+    const mainCanvas = document.getElementById("mainCanvas");
+    const zoomCanvas = document.getElementById("zoomCanvas");
+    const ctx = mainCanvas.getContext("2d");
+    const zoomCtx = zoomCanvas.getContext("2d");
+    const zoomIndicator = document.getElementById("zoomIndicator");
+    const bitInfo = document.getElementById("bitInfo");
+    const colorBar = document.getElementById("colorBar");
+
+    let img = new Image();
+    let sample = 32;
+    let quantBits = 8;
+    let imgDataBuffer = null;
+
+    imageLoader.addEventListener("change", e => {
+      const reader = new FileReader();
+      reader.onload = event => {
+        img.onload = () => {
+          drawImageWithGrid();
+        };
+        img.src = event.target.result;
+      };
+      reader.readAsDataURL(e.target.files[0]);
+    });
+
+    samplingInput.addEventListener("input", drawImageWithGrid);
+    sampleButton.addEventListener("click", sampleImage);
+    quantBitsInput.addEventListener("input", () => {});
+    quantButton.addEventListener("click", quantizeImage);
+
+    function drawImageWithGrid() {
+      sample = parseInt(samplingInput.value);
+      ctx.clearRect(0, 0, mainCanvas.width, mainCanvas.height);
+      ctx.drawImage(img, 0, 0, mainCanvas.width, mainCanvas.height);
+      drawGrid();
+    }
+
+    function drawGrid() {
+      const stepX = mainCanvas.width / sample;
+      const stepY = mainCanvas.height / sample;
+      ctx.strokeStyle = '#888';
+      for (let i = 0; i <= sample; i++) {
+        ctx.beginPath();
+        ctx.moveTo(i * stepX, 0);
+        ctx.lineTo(i * stepX, mainCanvas.height);
+        ctx.stroke();
+      }
+      for (let j = 0; j <= sample; j++) {
+        ctx.beginPath();
+        ctx.moveTo(0, j * stepY);
+        ctx.lineTo(mainCanvas.width, j * stepY);
+        ctx.stroke();
+      }
+    }
+
+    function sampleImage() {
+      const tempCanvas = document.createElement("canvas");
+      tempCanvas.width = sample;
+      tempCanvas.height = sample;
+      const tempCtx = tempCanvas.getContext("2d");
+      tempCtx.drawImage(img, 0, 0, sample, sample);
+      imgDataBuffer = tempCtx.getImageData(0, 0, sample, sample);
+
+      ctx.imageSmoothingEnabled = false;
+      ctx.clearRect(0, 0, mainCanvas.width, mainCanvas.height);
+      ctx.drawImage(tempCanvas, 0, 0, mainCanvas.width, mainCanvas.height);
+      drawGrid();
+      updateZoomAndOverlay();
+    }
+
+    function updateZoomAndOverlay() {
+      const zoomSize = 5;
+      const zoomStartX = Math.floor(sample / 2 - zoomSize / 2);
+      const zoomStartY = Math.floor(sample / 2 - zoomSize / 2);
+      const cellSize = zoomCanvas.width / zoomSize;
+      zoomCtx.clearRect(0, 0, zoomCanvas.width, zoomCanvas.height);
+
+      for (let y = 0; y < zoomSize; y++) {
+        for (let x = 0; x < zoomSize; x++) {
+          const i = ((zoomStartY + y) * sample + (zoomStartX + x)) * 4;
+          const r = imgDataBuffer.data[i];
+          const g = imgDataBuffer.data[i + 1];
+          const b = imgDataBuffer.data[i + 2];
+          const avg = Math.floor((r + g + b) / 3);
+          zoomCtx.fillStyle = `rgb(${avg},${avg},${avg})`;
+          zoomCtx.fillRect(x * cellSize, y * cellSize, cellSize, cellSize);
+          zoomCtx.fillStyle = '#000';
+          zoomCtx.fillText(avg.toString().padStart(3, ' '), x * cellSize + 5, y * cellSize + 20);
+        }
+      }
+    }
+
+    function quantizeImage() {
+      quantBits = parseInt(quantBitsInput.value);
+      const quantLevels = Math.pow(2, quantBits);
+      const pixels = imgDataBuffer.data;
+
+      for (let i = 0; i < pixels.length; i += 4) {
+        const avg = (pixels[i] + pixels[i + 1] + pixels[i + 2]) / 3;
+        const quant = Math.floor(avg / 255 * (quantLevels - 1));
+        const gray = Math.round(quant / (quantLevels - 1) * 255);
+        pixels[i] = pixels[i + 1] = pixels[i + 2] = gray;
+      }
+
+      const tempCanvas = document.createElement("canvas");
+      tempCanvas.width = sample;
+      tempCanvas.height = sample;
+      const tempCtx = tempCanvas.getContext("2d");
+      tempCtx.putImageData(imgDataBuffer, 0, 0);
+
+      ctx.imageSmoothingEnabled = false;
+      ctx.clearRect(0, 0, mainCanvas.width, mainCanvas.height);
+      ctx.drawImage(tempCanvas, 0, 0, mainCanvas.width, mainCanvas.height);
+      drawGrid();
+      updateZoomAndOverlay();
+
+      bitInfo.textContent = `${sample * sample * quantBits} bit (${sample}×${sample} 画素, ${quantBits}bit/画素)`;
+
+      colorBar.innerHTML = '';
+      for (let i = 0; i < quantLevels; i++) {
+        const level = Math.round(i / (quantLevels - 1) * 255);
+        const box = document.createElement("div");
+        box.className = 'color-box';
+        box.style.background = `rgb(${level},${level},${level})`;
+        colorBar.appendChild(box);
+      }
+    }
+  </script>
+</body>
+</html>
