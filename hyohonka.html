@@ -1,0 +1,230 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>標本化と量子化の体験</title>
+  <style>
+    body {
+      font-family: sans-serif;
+      text-align: center;
+      background-color: #f4f4f4;
+    }
+    canvas {
+      border: 1px solid #ccc;
+      background-color: white;
+      margin-top: 10px;
+    }
+    .controls {
+      margin: 20px;
+    }
+    .info {
+      margin-top: 10px;
+      font-weight: bold;
+    }
+  </style>
+</head>
+<body>
+  <h1>標本化と量子化の体験</h1>
+  $1
+    <label><input type="checkbox" id="showReconstruction" /> 再構成波形を表示</label>
+    <label>標本化レベル: <input type="range" id="sampleRate" min="4" max="32" value="8" /></label>
+    <label>量子化レベル: <input type="range" id="quantLevels" min="2" max="16" value="4" /></label>
+    <label><input type="checkbox" id="showGuides" checked /> ガイド線を表示</label>
+  </div>
+  <div class="info">
+    標本化周波数: <span id="sampleRateDisplay">0.8 Hz（間隔: 1.25s）</span> 点 ／ 量子化レベル: <span id="quantLevelDisplay">4 段階（2 bit）</span> 段階
+  </div>
+  <canvas id="waveCanvas" width="800" height="400"></canvas>
+  <div class="info">
+    デジタルデータ: <span id="binaryData"></span><br/>
+    データ量: <span id="dataSize"></span>
+  </div>
+
+  <script>
+    const canvas = document.getElementById('waveCanvas');
+    const ctx = canvas.getContext('2d');
+    const sampleSlider = document.getElementById('sampleRate');
+    const quantSlider = document.getElementById('quantLevels');
+    const showGuidesCheckbox = document.getElementById('showGuides');
+    const sampleRateDisplay = document.getElementById('sampleRateDisplay');
+    const quantLevelDisplay = document.getElementById('quantLevelDisplay');
+
+    let samplePoints = [];
+    let draggingPoint = null;
+
+    function draw() {
+      const binaryDisplay = document.getElementById('binaryData');
+      const dataSizeDisplay = document.getElementById('dataSize');
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      binaryDisplay.textContent = '';
+      dataSizeDisplay.textContent = '';
+
+      const sampleRate = parseInt(sampleSlider.value);
+      const quantLevels = parseInt(quantSlider.value);
+      const width = canvas.width;
+      const height = canvas.height;
+      const showGuides = showGuidesCheckbox.checked;
+
+      const samplingFrequency = sampleRate / 10;
+      const samplingInterval = (1 / samplingFrequency).toFixed(2);
+      sampleRateDisplay.textContent = `${samplingFrequency.toFixed(1)} Hz（間隔: ${samplingInterval}s）`;
+      const quantBits = Math.log2(quantLevels).toFixed(0);
+      quantLevelDisplay.textContent = `${quantLevels} 段階（${quantBits} bit）`;
+
+      if (showGuides) {
+        const fontSize = 12;
+        ctx.font = `${fontSize}px sans-serif`;
+        ctx.fillStyle = '#333';
+        ctx.textAlign = 'left';
+        ctx.textBaseline = 'middle';
+        // Draw wave background
+        ctx.beginPath();
+        ctx.moveTo(0, height / 2);
+        for (let x = 0; x <= width; x++) {
+          const y = height / 2 - Math.sin((x / width) * 4 * Math.PI) * 100;
+          ctx.lineTo(x, y);
+        }
+        ctx.strokeStyle = '#aaa';
+        ctx.stroke();
+
+        // Draw sampling vertical lines and time labels
+        for (let i = 0; i < sampleRate; i++) {
+          const x = (i / (sampleRate - 1)) * width;
+          const timeLabel = (i * (1 / (sampleRate - 1))).toFixed(2) + 's';
+          ctx.beginPath();
+          ctx.moveTo(x, 0);
+          ctx.lineTo(x, height);
+          ctx.strokeStyle = '#ddd';
+          ctx.stroke();
+          ctx.fillStyle = '#333';
+          ctx.textAlign = 'center';
+          ctx.textBaseline = 'top';
+          ctx.fillText(timeLabel, x, height - 16);
+        }
+
+        // Draw quantization horizontal lines and labels
+        for (let i = 0; i < quantLevels; i++) {
+          const y = (i / (quantLevels - 1)) * height;
+          const labelValue = (quantLevels - 1 - i);
+          const binaryLabel = labelValue.toString(2).padStart(Math.log2(quantLevels), '0');
+          ctx.fillText(`${labelValue} (${binaryLabel})`, 48, y);
+          ctx.beginPath();
+          ctx.moveTo(0, y);
+          ctx.lineTo(width, y);
+          ctx.strokeStyle = '#eee';
+          ctx.stroke();
+        }
+      }
+
+      // Draw reconstructed waveform if enabled
+      const showReconstruction = document.getElementById('showReconstruction').checked;
+      if (showReconstruction && samplePoints.length > 1) {
+        const sortedPoints = [...samplePoints].sort((a, b) => a.x - b.x);
+        ctx.beginPath();
+        ctx.moveTo(sortedPoints[0].x, sortedPoints[0].y);
+        for (let i = 1; i < sortedPoints.length; i++) {
+          ctx.lineTo(sortedPoints[i].x, sortedPoints[i].y);
+        }
+        ctx.strokeStyle = '#e91e63';
+        ctx.lineWidth = 2;
+        ctx.stroke();
+        ctx.lineWidth = 1;
+      }
+
+      // Draw sampled points
+      const sortedPointsForBinary = [...samplePoints].sort((a, b) => a.x - b.x);
+      let binaryString = '';
+      sortedPointsForBinary.forEach(p => {
+        ctx.beginPath();
+        ctx.arc(p.x, p.y, 6, 0, 2 * Math.PI);
+        ctx.fillStyle = '#007acc';
+        ctx.fill();
+
+        // Show binary value next to point
+        const quantLevels = parseInt(quantSlider.value);
+        const levelHeight = canvas.height / (quantLevels - 1);
+        const levelIndex = Math.round(p.y / levelHeight);
+        const binary = levelIndex.toString(2).padStart(Math.log2(quantLevels), '0');
+        ctx.fillStyle = '#000';
+        ctx.font = '12px sans-serif';
+        ctx.fillText(binary, p.x + 8, p.y - 8);
+        binaryString += binary;
+      });
+    }
+
+    function snapToQuant(y) {
+      const quantLevels = parseInt(quantSlider.value);
+      const step = canvas.height / (quantLevels - 1);
+      return Math.round(y / step) * step;
+    }
+
+    canvas.addEventListener('mousedown', e => {
+      const rect = canvas.getBoundingClientRect();
+      const x = e.clientX - rect.left;
+      const y = e.clientY - rect.top;
+
+      // Check if dragging
+      for (let p of samplePoints) {
+        if (Math.abs(p.x - x) < 10 && Math.abs(p.y - y) < 10) {
+          draggingPoint = p;
+          return;
+        }
+      }
+
+      // Add new point
+      const sampleRate = parseInt(sampleSlider.value);
+      const width = canvas.width;
+      const nearestX = Math.round((x / width) * (sampleRate - 1));
+      const snapX = (nearestX / (sampleRate - 1)) * width;
+
+      // Only one point per sample slot
+      if (!samplePoints.find(p => Math.abs(p.x - snapX) < 1)) {
+        const snapY = snapToQuant(y);
+        samplePoints.push({ x: snapX, y: snapY });
+        draw();
+      
+      }
+    });
+
+    canvas.addEventListener('mousemove', e => {
+      if (draggingPoint) {
+        const rect = canvas.getBoundingClientRect();
+        const y = e.clientY - rect.top;
+        draggingPoint.y = snapToQuant(y);
+        draw();
+      }
+    });
+
+    canvas.addEventListener('mouseup', () => {
+      draggingPoint = null;
+    });
+
+    sampleSlider.addEventListener('input', () => {
+      // 既存の samplePoints を保持しつつ、X 座標を再計算
+      const sampleRate = parseInt(sampleSlider.value);
+      const width = canvas.width;
+      const newSamplePoints = [];
+      samplePoints.forEach(p => {
+        const nearestIndex = Math.round((p.x / width) * (sampleRate - 1));
+        const newX = (nearestIndex / (sampleRate - 1)) * width;
+        // 同じXが存在しない場合のみ追加
+        if (!newSamplePoints.find(q => Math.abs(q.x - newX) < 1)) {
+          newSamplePoints.push({ x: newX, y: p.y });
+        }
+      });
+      samplePoints = newSamplePoints;
+      draw();
+    });
+
+    quantSlider.addEventListener('input', () => {
+      samplePoints.forEach(p => p.y = snapToQuant(p.y));
+      draw();
+    });
+
+    showGuidesCheckbox.addEventListener('change', draw);
+
+    draw();
+  </script>
+</body>
+</html>
