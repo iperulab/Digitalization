@@ -21,6 +21,14 @@
       margin-top: 20px;
       font-size: 14px;
     }
+    #watermark {
+      position: absolute;
+      bottom: 5px;
+      right: 10px;
+      font-size: 12px;
+      color: rgba(0, 0, 0, 0.1);
+      display: none;
+    }
   </style>
 </head>
 <body>
@@ -46,6 +54,8 @@
     デジタルデータ: <span id="binaryData"></span><br />
     データ量: <span id="bitCount"></span>
   </div>
+
+  <div id="watermark">©2005 Yoshihiro Yamamori ・ y2_yama@ishikawa-c.ed.jp</div>
 
   <script>
     const canvas = document.getElementById("waveCanvas");
@@ -189,6 +199,19 @@
     showGuides.addEventListener('change', draw);
     showReconstruction.addEventListener('change', draw);
     generateSamples();
+
+    // --- イースターエッグ（キーシーケンス：nisui） ---
+    const keyBuffer = [];
+    const targetSequence = ['n', 'i', 's', 'u', 'i'];
+    document.addEventListener("keydown", e => {
+      keyBuffer.push(e.key.toLowerCase());
+      if (keyBuffer.length > targetSequence.length) keyBuffer.shift();
+      if (keyBuffer.join('') === targetSequence.join('')) {
+        const wm = document.getElementById("watermark");
+        wm.style.display = 'block';
+        wm.style.color = 'rgba(0, 0, 0, 0.4)';
+      }
+    });
   </script>
 </body>
 </html>
