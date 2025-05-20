@@ -47,6 +47,14 @@
       width: 20px;
       height: 20px;
     }
+    #watermark {
+      position: absolute;
+      bottom: 5px;
+      right: 10px;
+      font-size: 12px;
+      color: rgba(0, 0, 0, 0.1);
+      display: none;
+    }
   </style>
 </head>
 <body>
@@ -65,6 +73,7 @@
     <div class="preview-box">
       <canvas id="mainCanvas" width="400" height="400"></canvas>
       <div class="zoom-indicator" id="zoomIndicator"></div>
+      <div id="watermark">©Yoshihiro Yamamori ・ emethmeth1@gmail.com</div>
     </div>
     <div class="preview-box">
       <canvas id="zoomCanvas" width="400" height="400"></canvas>
@@ -88,11 +97,14 @@
     const zoomIndicator = document.getElementById("zoomIndicator");
     const bitInfo = document.getElementById("bitInfo");
     const colorBar = document.getElementById("colorBar");
+    const watermark = document.getElementById("watermark");
 
     let img = new Image();
     let sample = 32;
     let quantBits = 8;
     let imgDataBuffer = null;
+    let keySequence = [];
+    const targetSequence = ['i', 'p', 'e', 'r', 'u', 'l', 'a', 'b'];
 
     imageLoader.addEventListener("change", e => {
       const reader = new FileReader();
@@ -109,6 +121,15 @@
     sampleButton.addEventListener("click", sampleImage);
     quantBitsInput.addEventListener("input", () => {});
     quantButton.addEventListener("click", quantizeImage);
+
+    document.addEventListener("keydown", e => {
+      keySequence.push(e.key.toLowerCase());
+      if (keySequence.length > targetSequence.length) keySequence.shift();
+      if (keySequence.join('') === targetSequence.join('')) {
+        watermark.style.display = 'block';
+        watermark.style.color = 'rgba(0, 0, 0, 0.4)';
+      }
+    });
 
     function drawImageWithGrid() {
       sample = parseInt(samplingInput.value);
