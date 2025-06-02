@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>画像のデジタル化体験（クリーン版）</title>
+  <title>画像のデジタル化体験（フルカラー対応）</title>
   <style>
     body {
       font-family: sans-serif;
@@ -20,6 +20,11 @@
     .controls, .info {
       margin-top: 20px;
       font-size: 14px;
+    }
+    #currentSettings {
+      margin-top: 8px;
+      font-size: 14px;
+      line-height: 1.6;
     }
     .preview-wrapper {
       display: flex;
@@ -38,14 +43,24 @@
     }
     .color-bar {
       display: flex;
-      justify-content: center;
-      gap: 4px;
-      margin-top: 10px;
       flex-wrap: wrap;
+      justify-content: center;
+      margin-top: 10px;
+      max-width: 1000px;
+      margin-left: auto;
+      margin-right: auto;
+      display: none;
     }
     .color-box {
-      width: 20px;
-      height: 20px;
+      width: 16px;
+      height: 16px;
+      border: 1px solid #999;
+    }
+    .color-label {
+      width: 100%;
+      text-align: left;
+      margin-top: 6px;
+      font-weight: bold;
     }
     #watermark {
       position: absolute;
@@ -63,17 +78,18 @@
     <input type="file" id="imageLoader" accept="image/*">
     <label>標本化レベル: <input type="range" id="sampling" min="4" max="128" value="32" /></label>
     <label>量子化ビット数: <input type="range" id="quantBits" min="1" max="8" value="8" /></label>
+    <div id="currentSettings">現在の標本化：32 × 32<br>現在の量子化：8 bit</div>
+    <label><input type="radio" name="mode" value="gray" checked> グレースケール</label>
+    <label><input type="radio" name="mode" value="color"> フルカラー</label><br>
     <button id="sampleButton">標本化</button>
     <button id="quantButton">量子化</button>
   </div>
-
-  <div class="color-bar" id="colorBar"></div>
 
   <div class="preview-wrapper">
     <div class="preview-box">
       <canvas id="mainCanvas" width="400" height="400"></canvas>
       <div class="zoom-indicator" id="zoomIndicator"></div>
-      <div id="watermark">© 2025 Yoshihiro Yamamori ・ y2_yama@ishikawa-c.ed.jp</div>
+      <div id="watermark">© 2025 Yoshihiro Yamamori ・ emethmeth1@gmail.com</div>
     </div>
     <div class="preview-box">
       <canvas id="zoomCanvas" width="400" height="400"></canvas>
@@ -83,6 +99,11 @@
   <div class="info">
     データ量: <span id="bitInfo"></span>
   </div>
+
+  <div>
+    <button id="toggleColorBar">使用できる色を表示</button>
+  </div>
+  <div class="color-bar" id="colorBar"></div>
 
   <script>
     const imageLoader = document.getElementById("imageLoader");
@@ -97,30 +118,56 @@
     const zoomIndicator = document.getElementById("zoomIndicator");
     const bitInfo = document.getElementById("bitInfo");
     const colorBar = document.getElementById("colorBar");
+    const toggleColorBarButton = document.getElementById("toggleColorBar");
     const watermark = document.getElementById("watermark");
 
     let img = new Image();
     let sample = 32;
     let quantBits = 8;
     let imgDataBuffer = null;
+    let mode = "gray";
     let keySequence = [];
     const targetSequence = ['n', 'i', 's', 'u', 'i'];
+
+    function updateCurrentSettings() {
+      const currentSampling = parseInt(samplingInput.value);
+      const currentQuant = parseInt(quantBitsInput.value);
+      document.getElementById("currentSettings").innerHTML =
+        `現在の標本化：${currentSampling} × ${currentSampling}<br>現在の量子化：${currentQuant} bit`;
+    }
+
+    document.getElementsByName("mode").forEach(radio => {
+      radio.addEventListener("change", () => {
+        mode = document.querySelector('input[name="mode"]:checked').value;
+        updateColorBar();
+      });
+    });
 
     imageLoader.addEventListener("change", e => {
       const reader = new FileReader();
       reader.onload = event => {
-        img.onload = () => {
-          drawImageWithGrid();
-        };
+        img.onload = () => drawImageWithGrid();
         img.src = event.target.result;
       };
       reader.readAsDataURL(e.target.files[0]);
     });
 
-    samplingInput.addEventListener("input", drawImageWithGrid);
+    samplingInput.addEventListener("input", () => {
+      drawImageWithGrid();
+      updateCurrentSettings();
+    });
+    quantBitsInput.addEventListener("input", () => {
+      quantBits = parseInt(quantBitsInput.value);
+      updateColorBar();
+      updateCurrentSettings();
+    });
     sampleButton.addEventListener("click", sampleImage);
-    quantBitsInput.addEventListener("input", () => {});
     quantButton.addEventListener("click", quantizeImage);
+
+    toggleColorBarButton.addEventListener("click", () => {
+      colorBar.style.display = (colorBar.style.display === "none") ? "flex" : "none";
+      toggleColorBarButton.textContent = colorBar.style.display === "flex" ? "使用できる色を隠す" : "使用できる色を表示";
+    });
 
     document.addEventListener("keydown", e => {
       keySequence.push(e.key.toLowerCase());
@@ -177,6 +224,7 @@
       const zoomStartY = Math.floor(sample / 2 - zoomSize / 2);
       const cellSize = zoomCanvas.width / zoomSize;
       zoomCtx.clearRect(0, 0, zoomCanvas.width, zoomCanvas.height);
+      const quantLevels = Math.pow(2, quantBits);
 
       for (let y = 0; y < zoomSize; y++) {
         for (let x = 0; x < zoomSize; x++) {
@@ -184,11 +232,23 @@
           const r = imgDataBuffer.data[i];
           const g = imgDataBuffer.data[i + 1];
           const b = imgDataBuffer.data[i + 2];
-          const avg = Math.floor((r + g + b) / 3);
-          zoomCtx.fillStyle = `rgb(${avg},${avg},${avg})`;
+          zoomCtx.fillStyle = `rgb(${r},${g},${b})`;
           zoomCtx.fillRect(x * cellSize, y * cellSize, cellSize, cellSize);
+
+          // 表示用：量子化された2進数表示
+          const rQ = Math.floor(r / 255 * (quantLevels - 1));
+          const gQ = Math.floor(g / 255 * (quantLevels - 1));
+          const bQ = Math.floor(b / 255 * (quantLevels - 1));
+
+          const rBin = rQ.toString(2).padStart(quantBits, '0');
+          const gBin = gQ.toString(2).padStart(quantBits, '0');
+          const bBin = bQ.toString(2).padStart(quantBits, '0');
+
           zoomCtx.fillStyle = '#000';
-          zoomCtx.fillText(avg.toString().padStart(3, ' '), x * cellSize + 5, y * cellSize + 20);
+          zoomCtx.font = "10px monospace";
+          zoomCtx.fillText(`R:${rBin}`, x * cellSize + 2, y * cellSize + 12);
+          zoomCtx.fillText(`G:${gBin}`, x * cellSize + 2, y * cellSize + 24);
+          zoomCtx.fillText(`B:${bBin}`, x * cellSize + 2, y * cellSize + 36);
         }
       }
     }
@@ -199,10 +259,18 @@
       const pixels = imgDataBuffer.data;
 
       for (let i = 0; i < pixels.length; i += 4) {
-        const avg = (pixels[i] + pixels[i + 1] + pixels[i + 2]) / 3;
-        const quant = Math.floor(avg / 255 * (quantLevels - 1));
-        const gray = Math.round(quant / (quantLevels - 1) * 255);
-        pixels[i] = pixels[i + 1] = pixels[i + 2] = gray;
+        if (mode === "gray") {
+          const avg = (pixels[i] + pixels[i + 1] + pixels[i + 2]) / 3;
+          const quant = Math.floor(avg / 255 * (quantLevels - 1));
+          const gray = Math.round(quant / (quantLevels - 1) * 255);
+          pixels[i] = pixels[i + 1] = pixels[i + 2] = gray;
+        } else {
+          for (let c = 0; c < 3; c++) {
+            const value = pixels[i + c];
+            const quant = Math.floor(value / 255 * (quantLevels - 1));
+            pixels[i + c] = Math.round(quant / (quantLevels - 1) * 255);
+          }
+        }
       }
 
       const tempCanvas = document.createElement("canvas");
@@ -217,15 +285,42 @@
       drawGrid();
       updateZoomAndOverlay();
 
-      bitInfo.textContent = `${sample * sample * quantBits} bit (${sample}×${sample} 画素, ${quantBits}bit/画素)`;
+      bitInfo.textContent = `${sample * sample * (mode === "gray" ? quantBits : quantBits * 3)} bit`;
+      updateColorBar();
+    }
 
+    function updateColorBar() {
       colorBar.innerHTML = '';
-      for (let i = 0; i < quantLevels; i++) {
-        const level = Math.round(i / (quantLevels - 1) * 255);
-        const box = document.createElement("div");
-        box.className = 'color-box';
-        box.style.background = `rgb(${level},${level},${level})`;
-        colorBar.appendChild(box);
+      const levels = Math.pow(2, quantBits);
+
+      if (mode === "gray") {
+        for (let i = 0; i < levels; i++) {
+          const val = Math.round(i / (levels - 1) * 255);
+          const box = document.createElement("div");
+          box.className = "color-box";
+          box.style.backgroundColor = `rgb(${val},${val},${val})`;
+          colorBar.appendChild(box);
+        }
+      } else {
+        const channels = [
+          { name: "R", color: (v) => `rgb(${v},0,0)` },
+          { name: "G", color: (v) => `rgb(0,${v},0)` },
+          { name: "B", color: (v) => `rgb(0,0,${v})` }
+        ];
+        channels.forEach(channel => {
+          const label = document.createElement("div");
+          label.textContent = channel.name + ":";
+          label.className = "color-label";
+          colorBar.appendChild(label);
+
+          for (let i = 0; i < levels; i++) {
+            const val = Math.round(i / (levels - 1) * 255);
+            const box = document.createElement("div");
+            box.className = "color-box";
+            box.style.backgroundColor = channel.color(val);
+            colorBar.appendChild(box);
+          }
+        });
       }
     }
   </script>
